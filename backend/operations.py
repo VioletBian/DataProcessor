@@ -86,6 +86,66 @@ class OperationFactory:
             return Operation(lambda df, **k: df.assign(**{col_name: df.query(condition).eval(value_expr)}))
         raise ValueError(f"Unsupported col_assign method: {method}")
 
+    @staticmethod
+    def col_apply(on: List[str], method: str, value_expr: Any = None, condition: str = "index > -1") -> Operation:
+        columns = on or []
+
+        def normalize_mapping(columns: List[str], mapping: Any) -> Dict[str, str]:
+            normalized: Dict[str, str] = {}
+            if mapping is None:
+                return {col: col for col in columns}
+            if isinstance(mapping, dict):
+                for col in columns:
+                    target = mapping.get(col)
+                    normalized[col] = target if target else col
+                return normalized
+            if isinstance(mapping, list):
+                for idx, col in enumerate(columns):
+                    target = mapping[idx] if idx < len(mapping) else None
+                    normalized[col] = target if target else col
+                return normalized
+            if isinstance(mapping, str):
+                return {col: mapping if mapping else col for col in columns}
+            return {col: col for col in columns}
+
+        def resolve_callable(expression: str) -> Callable:
+            if not expression or not expression.strip():
+                raise ValueError("col_apply requires a callable `method` expression.")
+            namespace = {"np": np, "pd": pd}
+            try:
+                candidate = eval(expression, namespace)
+            except Exception as exc:
+                raise ValueError(f"Unable to evaluate col_apply method: {expression}") from exc
+            if not callable(candidate):
+                raise ValueError(f"col_apply method must be callable, got: {expression}")
+            return candidate
+
+        apply_callable = resolve_callable(method)
+        rename_map = normalize_mapping(columns, value_expr)
+
+        def _op(df: pd.DataFrame, **k) -> pd.DataFrame:
+            if not columns:
+                return df
+            working_df = df.copy()
+            target_df = df.query(condition) if condition else df
+            if target_df.empty:
+                return working_df
+            for col in columns:
+                if col not in df.columns:
+                    continue
+                dest_col = rename_map.get(col, col)
+                try:
+                    transformed = apply_callable(target_df, col)
+                except TypeError:
+                    transformed = apply_callable(target_df[col])
+                if not isinstance(transformed, pd.Series):
+                    transformed = pd.Series(transformed, index=target_df.index)
+                transformed = transformed.reindex(target_df.index)
+                working_df.loc[target_df.index, dest_col] = transformed
+            return working_df
+
+        return Operation(_op, on=columns, method=method, value_expr=value_expr, condition=condition)
+
 
 def parse_pipeline_operations(pipeline: List[Dict[str, Any]]) -> List[Operation]:
     operations: List[Operation] = []
@@ -124,6 +184,15 @@ def parse_pipeline_operations(pipeline: List[Dict[str, Any]]) -> List[Operation]
                     params["method"],
                     col_name=params["col_name"],
                     value_expr=params["value_expr"],
+                    condition=condition,
+                )
+            )
+        elif op["type"] == "col_apply":
+            operations.append(
+                OperationFactory.col_apply(
+                    on=params["on"],
+                    method=params["method"],
+                    value_expr=params.get("value_expr"),
                     condition=condition,
                 )
             )

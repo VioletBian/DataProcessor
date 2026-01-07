@@ -18,6 +18,7 @@ import { Select, SelectRefMethods, SelectChangeEvent } from "@gs-ux-uitoolkit-re
 import { Button } from "@gs-ux-uitoolkit-react/button";
 import MapEditor from "./MapEditor";
 import NestedMapEditor from "./NestedMapEditor";
+import { QueryFieldWrapper } from "../QueryFieldWrapper"; // 导入新组件
 
 const createId = (): string => `step-${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 8)}`;
 
@@ -56,6 +57,7 @@ interface ParamProps<T extends OperatorType> {
   allValues: any;
   onChange: (val: any) => void;
   // subKey?: T extends "aggregate"? AggregateActionKey : never;
+  columns?: string[]; // Add this
 }
 
 interface ParamInputProps<T extends OperatorType> {
@@ -64,13 +66,67 @@ interface ParamInputProps<T extends OperatorType> {
   allValues: any;
   onChange: (val: any) => void;
   subKey?: T extends "aggregate" ? AggregateActionKey : never;
+  columns?: string[]; // 新增
 }
 
 export function ParamInput<T extends OperatorType>(props: ParamInputProps<T>): JSX.Element | null {
-  const { meta, value, allValues, onChange, subKey }: ParamInputProps<T> = props;
+  const { meta, value, allValues, onChange, subKey, columns = [] } = props;
+
+  // 1. 实现 QueryField 逻辑：仅当有列信息且字段为 condition 时启用
+  if (meta.uiType === "string" && meta.required && props.meta.description.includes("condition")) {
+     if (columns.length > 0) {
+         return (
+             <QueryFieldWrapper 
+                value={value} 
+                onChange={onChange} 
+                columns={columns} 
+                placeholder={meta.placeholder}
+             />
+         );
+     }
+  }
 
   switch (meta.uiType) {
     case "string-list":
+      // 2. 增强 string-list：如果有 columns，变为可输可选的 Select (Multi-select)
+      // 这里简化处理：如果提供了 columns，渲染一个带 suggestions 的组件，
+      // 或者你可以使用 TagInput + Autocomplete。这里为了简单，用 Select 模拟多选列表选择
+      if (columns.length > 0) {
+          // 将 columns 转为 options
+          const options = columns.map(c => ({ value: c, label: c }));
+          // 注意：这取决于你的 Select 组件是否支持 multi-select 并且返回 array
+          // 假设 GS toolkit 的 Select 支持 multiple
+           /* 
+           return (
+             <Select 
+                options={options}
+                mode="multiple" // 假设属性
+                ...
+             />
+           )
+           */
+           // 由于我不确定 GS Select 的多选 API，还是保留 Input 但给个 datalist 提示
+           return (
+            <>
+                <Input
+                  list={`list-${meta.placeholder}`} // 利用原生 datalist
+                  style={{ width: "98%" }}
+                  className="pjg-input"
+                  value={value}
+                  placeholder={meta.placeholder}
+                  helperContent={meta.description}
+                  required={meta.required}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>): void => onChange(stringListInputConvert(e.target.value))}
+                  onClearClick={() => onChange([])}
+                  clearable={true}
+                />
+                <datalist id={`list-${meta.placeholder}`}>
+                    {columns.map(col => <option key={col} value={col} />)}
+                </datalist>
+                <div style={{fontSize: 10, color: '#aaa'}}>Available columns: {columns.join(', ')}</div>
+            </>
+          );
+      }
       return (
         <Input
           style={{ width: "98%" }}
@@ -337,6 +393,7 @@ export const Param = <T extends OperatorType>({
   value,
   allValues,
   onChange,
+  columns, // Add this
 }: ParamProps<T>): null | Element => {
   const meta: ParamMeta<any> = OPERATOR_PARAM_META_CONFIG[operatorType][paramKey] as ParamMeta<any>;
   if (!meta) return null;
@@ -368,7 +425,7 @@ export const Param = <T extends OperatorType>({
                 <Tooltip target={subKey as string}>{subMeta.helperContent}</Tooltip>
               </Col>
               <Col xs={6} lg={9} style={{ display: "flex", alignItems: "center" }}>
-                <ParamInput onChange={onChange} value={value} meta={meta} allValues={allValues} subKey={subKey} />
+                <ParamInput onChange={onChange} value={value} meta={meta} allValues={allValues} subKey={subKey} columns={columns} />
               </Col>
             </Row>
           );
@@ -386,7 +443,7 @@ export const Param = <T extends OperatorType>({
         <Tooltip target={uuidLabelId}>{meta.helperContent}</Tooltip>
       </Col>
       <Col xs={6} lg={9} style={{ display: "flex", alignItems: "center" }}>
-        <ParamInput meta={meta} value={value} allValues={allValues} onChange={onChange} />
+        <ParamInput meta={meta} value={value} allValues={allValues} onChange={onChange} columns={columns} />
       </Col>
     </Row>
   );

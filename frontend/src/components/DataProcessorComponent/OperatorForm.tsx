@@ -12,9 +12,10 @@ export interface PipelineStep<T extends OperatorType = OperatorType> {
 interface OperatorFormProps {
   step: PipelineStep | null;
   onChange: (step: PipelineStep) => void;
+  columns?: string[]; // 新增 columns 属性
 }
 
-export const OperatorForm: React.FC<OperatorFormProps> = ({ step, onChange }) => {
+export const OperatorForm: React.FC<OperatorFormProps> = ({ step, onChange, columns = [] }) => {
   if (!step) {
     return (
       <div className="pjg-empty-state">
@@ -38,6 +39,7 @@ export const OperatorForm: React.FC<OperatorFormProps> = ({ step, onChange }) =>
           paramKey={key as any}
           value={(params as any)?.[key]}
           allValues={params || {}}
+          columns={columns} // 传递 columns
           onChange={(newVal: any): void => {
             setParams((nextParams: any) => ({
               ...params,

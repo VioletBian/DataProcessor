@@ -64,9 +64,10 @@ interface StringListInputProps {
 interface OperatorFormProps {
   step: PipelineStep | null;
   onChange: (step: PipelineStep) => void;
+  columns?: string[]; // 传入已识别的列名
 }
 
-const OperatorForm: React.FC<OperatorFormProps> = ({step, onChange}) => {
+const OperatorForm: React.FC<OperatorFormProps> = ({step, onChange, columns}) => {
   if (!step) {
     return (
       <Container className="pjg-empty-state">
@@ -119,9 +120,40 @@ function reorderSteps(
   return list;
 }
 
-export const PipelineJsonGenerator: React.FC = () => {
+// 接收外部传入的状态，使其成为受控组件
+interface PipelineJsonGeneratorProps {
+  steps?: PipelineStep<OperatorType>[];
+  onStepsChange?: (steps: PipelineStep<OperatorType>[]) => void;
+  columns?: string[]; // 传入已识别的列名
+}
 
-  const [steps, setSteps] = useState<PipelineStep<OperatorType>[]>([]);
+export const PipelineJsonGenerator: React.FC<PipelineJsonGeneratorProps> = ({
+  steps: externalSteps,
+  onStepsChange,
+  columns = []
+}) => {
+  // 使用内部状态如果外部没传，否则同步外部状态
+  const [internalSteps, setInternalSteps] = useState<PipelineStep<OperatorType>[]>([]);
+  
+  // 衍生的当前步骤
+  const steps = externalSteps || internalSteps;
+
+  // 包装一下 setSteps，兼容受控和非受控
+  const updateSteps = (newStepsOrUpdater: any) => {
+    let newSteps;
+    if (typeof newStepsOrUpdater === 'function') {
+        newSteps = newStepsOrUpdater(steps);
+    } else {
+        newSteps = newStepsOrUpdater;
+    }
+
+    if (onStepsChange) {
+        onStepsChange(newSteps);
+    } else {
+        setInternalSteps(newSteps);
+    }
+  };
+
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<OperatorType | undefined>(undefined);
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
@@ -133,41 +165,42 @@ export const PipelineJsonGenerator: React.FC = () => {
 
   const handleDragUpdate = React.useCallback(
     (result: DragAndDropStateUpdateEvent): void => {
-      setSteps((prev: PipelineStep<OperatorType>[]) => reorderSteps(prev, result));
+      updateSteps((prev: PipelineStep<OperatorType>[]) => reorderSteps(prev, result));
     },
-    [],
+    [onStepsChange]
   );
 
   const handleAddStep = (type: OperatorType): void => {
     const newStep: PipelineStep = createStep(type);
-    setSteps((prev: PipelineStep<OperatorType>[]) => [...prev, newStep]);
+    updateSteps((prev: PipelineStep<OperatorType>[]) => [...prev, newStep]);
     setSelectedStepId(newStep.id);
   };
-
+  
   const handleRemoveStep = (id: string): void => {
-    setSteps((prev: PipelineStep<OperatorType>[]) => prev.filter((step: PipelineStep<OperatorType>) => step.id !== id));
-    if (selectedStepId === id) {
-      setSelectedStepId(() => null);
-    }
+      updateSteps((prev: PipelineStep<OperatorType>[]) => prev.filter((step: PipelineStep<OperatorType>) => step.id !== id));
+      if (selectedStepId === id) {
+        setSelectedStepId(() => null);
+      }
   };
 
   const moveStep = (id: string, direction: "up" | "down"): void => {
-    setSteps((prev: PipelineStep<OperatorType>[]) => {
-      const index: number = prev.findIndex((step: PipelineStep<OperatorType>) => step.id === id);
-      if (index === -1) return prev;
-      const newIndex: number = direction === "up" ? index - 1 : index + 1;
-      if (newIndex < 0 || newIndex >= prev.length) return prev;
-      const next: PipelineStep<OperatorType>[] = [...prev];
-      const [moved] = next.splice(index, 1);
-      next.splice(newIndex, 0, moved);
-      return next;
+      updateSteps((prev: PipelineStep<OperatorType>[]) => {
+          // Copy existing logic
+          const index: number = prev.findIndex((step: PipelineStep<OperatorType>) => step.id === id);
+          if (index === -1) return prev;
+          const newIndex: number = direction === "up" ? index - 1 : index + 1;
+          if (newIndex < 0 || newIndex >= prev.length) return prev;
+          const next: PipelineStep<OperatorType>[] = [...prev];
+          const [moved] = next.splice(index, 1);
+          next.splice(newIndex, 0, moved);
+          return next;
     });
   };
 
   const handleStepChange = (updated: PipelineStep): void => {
-    setSteps((prev: PipelineStep<OperatorType>[]) => prev.map((step: PipelineStep<OperatorType>) => (step.id === updated.id ? updated : step)));
+    updateSteps((prev: PipelineStep<OperatorType>[]) => prev.map((step: PipelineStep<OperatorType>) => (step.id === updated.id ? updated : step)));
   };
-
+  
   const toggleExpand = (id: string): void => {
     setExpandedIds((prev: string[]) => {
       if (prev.includes(id)) {
@@ -233,7 +266,7 @@ export const PipelineJsonGenerator: React.FC = () => {
           </Row>
         </div>
         <Collapse in={expanded}>
-          <OperatorForm step={step} onChange={handleStepChange} />
+          <OperatorForm step={step} onChange={handleStepChange} columns={columns} />
         </Collapse>
       </ListGroupItem>
     );
@@ -242,7 +275,9 @@ export const PipelineJsonGenerator: React.FC = () => {
   return (
     <div style={{padding: "0 0 0 0"}}>
       <div style={{display: "flex"}}>
-        <Container className="pjg-generator" maxWidth={"85%"}>
+        <Container className="pjg-generator" style={{width: "100%", padding: 10}}>
+          {/** Replace HeaderComponent usage inside drawer if any */}
+          
           <ListGroup dragAndDrop={true} id={"operator-list-group"} onStateUpdate={handleDragUpdate}>
             {steps.map((step: PipelineStep<OperatorType>, index: number) => (
               <div key={step.id}>
@@ -250,50 +285,46 @@ export const PipelineJsonGenerator: React.FC = () => {
               </div>
             ))}
           </ListGroup>
-        </Container>
-        <Col xs={3} lg={4}>
-          <Form style={{marginBottom:"50px"}}>
-            <FormGroup>
-              <Row style={{marginBottom: "5px"}}>
-                <Col xs={3} lg={4}>
-                  <H3>Add Operator</H3>
-                </Col>
-                <Col xs={8} lg={8}>
-                </Col>
-              </Row>
-            </FormGroup>
-            <Separator emphasis={"subtle"} />
-            <Row style={{paddingLeft:"2.5%", paddingRight:"2.5%"}}>
-              <Select options={Object.values(OPERATOR_META).map((item: OperatorMeta) => ({
-                value: item.type,
-                label: item.title
-              }))}
-              style={{width: "80%"}}
-              placeholder={"select operator type"}
-              onChange={(event: any) => setSelectedType(event.selectedValue as OperatorType)}
-              />
-              <Button disabled={!selectedType} onClick={() => {
-                if (selectedType) {
-                  handleAddStep(selectedType as OperatorType);
-                }
-              }}>Add</Button>
-            </Row>
+           
+           <Separator style={{margin: "20px 0"}}/>
+           
+           {/* Add Buttons area */}
+           <Form style={{marginBottom:"50px"}}>
+               {/* 简化布局以适应 Drawer 宽度 */}
+                <Row>
+                     <H3>Add Operator</H3>
+                </Row>
+                <Row>
+                    <Select options={Object.values(OPERATOR_META).map((item: OperatorMeta) => ({
+                      value: item.type,
+                      label: item.title
+                    }))}
+                    style={{width: "80%"}}
+                    placeholder={"select operator type"}
+                    onChange={(event: any) => setSelectedType(event.selectedValue as OperatorType)}
+                    />
+                    <Button disabled={!selectedType} onClick={() => {
+                      if (selectedType) {
+                        handleAddStep(selectedType as OperatorType);
+                      }
+                    }}>Add</Button>
+                </Row>
+                {operator_rows.map((row: OperatorType[], rowIndex: number) => (
+                  <Row key={rowIndex}>
+                    {row.map((type: OperatorType, colIndex: number) => {
+                      const meta: OperatorMeta = OPERATOR_META[type];
+                      return (
+                        <Col xs={4} lg={6} key={colIndex}>
+                          <Button style={{width: "90%"}} emphasis={"subtle"} type={"button"} onClick={() => handleAddStep(type)}>{meta.title}</Button>
+                        </Col>
+                      );
+                    })}
+                  </Row>
+                ))}
+           </Form>
 
-            {operator_rows.map((row: OperatorType[], rowIndex: number) => (
-              <Row key={rowIndex}>
-                {row.map((type: OperatorType, colIndex: number) => {
-                  const meta: OperatorMeta = OPERATOR_META[type];
-                  return (
-                    <Col xs={4} lg={6} key={colIndex}>
-                      <Button style={{width: "90%"}} emphasis={"subtle"} type={"button"} onClick={() => handleAddStep(type)}>{meta.title}</Button>
-                    </Col>
-                  );
-                })}
-              </Row>
-            ))}
-          </Form>
-          <JsonView data={steps} />
-        </Col>
+        </Container>
+        {/* Remove Right Column (JsonView and Buttons) from here, display logic moves to Parent */}
       </div>
     </div>
   );

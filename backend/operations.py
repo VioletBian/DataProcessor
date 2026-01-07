@@ -86,6 +86,95 @@ class OperationFactory:
             return Operation(lambda df, **k: df.assign(**{col_name: df.query(condition).eval(value_expr)}))
         raise ValueError(f"Unsupported col_assign method: {method}")
 
+
+    @staticmethod
+    def series_transform(on: List[str], transform_expr: str, rename: List[str] = None, condition: str = "index > -1") -> Operation:
+        """
+        Series 变换算子 (原 col_apply):
+        针对单列进行向量化或时序变换 (如 shift, diff, log, rolling)。
+        
+        :param on: 输入列名列表 (e.g. ["close"])
+        :param transform_expr: 变换逻辑字符串 (e.g. "lambda x: x - x.shift(1)")
+        :param rename: 输出列名列表 (e.g. ["close_diff"])。如果为 None，则直接覆盖 on 指定的列。
+        :param condition: 筛选条件 (注意：shift/diff 等操作若在筛选后执行，是基于筛选后的相邻行)
+        """
+        columns = on or []
+        
+        # 1. 确定输出列名 (dest_columns)
+        dest_columns = columns # 默认覆盖原列
+        if rename:
+            if isinstance(rename, str):
+                rename = [rename]
+            if len(rename) != len(columns):
+                raise ValueError(f"Length mismatch: 'on' has {len(columns)} cols, but 'rename' has {len(rename)}.")
+            dest_columns = rename
+
+        # 2. 解析变换函数
+        def resolve_func(expression: str) -> Callable:
+            if not expression or not isinstance(expression, str):
+                raise ValueError("series_transform requires a string 'transform_expr'.")
+            
+            # 注入常用库，方便 lambda 编写
+            namespace = {"np": np, "pd": pd} 
+            try:
+                # 期望 expression 计算结果是一个 Callable
+                func = eval(expression, namespace)
+            except Exception as exc:
+                raise ValueError(f"Failed to eval transform_expr: {expression}") from exc
+            
+            if not callable(func):
+                raise ValueError(f"transform_expr must resolve to a callable, got type: {type(func)}")
+            return func
+
+        # 预先解析函数，避免在 _op 内部重复解析
+        transform_func = resolve_func(transform_expr)
+
+        def _op(df: pd.DataFrame, **k) -> pd.DataFrame:
+            if not columns:
+                return df
+            
+            working_df = df.copy()
+            
+            # 3. 处理筛选条件
+            # 如果 condition 为 "index > -1" 或空，则 target_indices 为全量索引
+            try:
+                target_indices = df.query(condition).index
+            except Exception as e:
+                # 容错处理，防止 query 失败
+                print(f"Warning: query failed in series_transform ({e}), using full index.")
+                target_indices = df.index
+
+            if target_indices.empty:
+                return working_df
+
+            # 4. 逐列计算并回填
+            for src_col, dest_col in zip(columns, dest_columns):
+                if src_col not in df.columns:
+                    continue
+                
+                # 提取源数据 Series
+                series_data = df.loc[target_indices, src_col]
+                
+                try:
+                    # 执行变换 (e.g. lambda x: x.shift(1))
+                    transformed = transform_func(series_data)
+                except Exception as e:
+                    raise RuntimeError(f"Error executing {transform_expr} on column '{src_col}': {e}")
+
+                # 确保结果是 Series 并且索引对齐
+                if not isinstance(transformed, pd.Series):
+                    # 如果返回的是 scalar 或 numpy array，强制转为 Series 并对齐索引
+                    transformed = pd.Series(transformed, index=target_indices)
+                
+                # 将变换后的数据写回 (reindex 确保索引顺序一致)
+                working_df.loc[target_indices, dest_col] = transformed.reindex(target_indices)
+
+            return working_df
+
+        return Operation(_op, on=columns, transform_expr=transform_expr, rename=dest_columns, condition=condition)
+
+
+
     @staticmethod
     def col_apply(on: List[str], method: str, value_expr: Any = None, condition: str = "index > -1") -> Operation:
         columns = on or []
@@ -196,4 +285,16 @@ def parse_pipeline_operations(pipeline: List[Dict[str, Any]]) -> List[Operation]
                     condition=condition,
                 )
             )
+
+        elif op["type"] == "series_transform":
+            operations.append(
+                OperationFactory.series_transform(
+                    on=params["on"],
+                    transform_expr=params["transform_expr"],
+                    # 使用 rename 参数，如果没有则为 None (表示覆盖)
+                    rename=params.get("rename"), 
+                    condition=condition,
+                )
+            )
+
     return operations

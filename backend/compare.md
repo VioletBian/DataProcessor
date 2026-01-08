@@ -1,3 +1,11 @@
+# 格式
+{
+  "name": "my_first_pipeline",
+  "pipeline": [
+    {"op": "fillna", "value": 0}
+  ]
+}
+# 算子
 在某些简单场景下（比如“对某一列取对数”），col_assign 和 series_transform 的功能是有重叠的。
 但是，从底层实现机制、数据视角的维度以及适用场景来看，它们有本质的区别。
 简单总结一句话：

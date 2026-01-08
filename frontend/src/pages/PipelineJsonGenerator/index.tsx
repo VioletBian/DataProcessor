@@ -331,3 +331,111 @@ export const PipelineJsonGenerator: React.FC<PipelineJsonGeneratorProps> = ({
 };
 
 export default PipelineJsonGenerator;
+
+
+
+// 新增: 用于存储 input 输入的 pipeline 名称
+const [pipelineName, setPipelineName] = useState("");
+// 2.1 Load: 从数据库加载 Pipeline
+const loadPipelineFromDB = async () => {
+    if (!pipelineName) {
+        alert("Please enter a Pipeline Name first!");
+        return;
+    }
+
+    try {
+        // 调用 GET 接口
+        const response = await fetch(`http://127.0.0.1:8003/dp/pipeline/get?name=${pipelineName}`, {
+            method: 'GET',
+        });
+
+        if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(errData.detail || "Pipeline not found");
+        }
+
+        const data = await response.json();
+        
+        // 假设后端返回的是 { name: "...", pipeline: [...] }
+        // 我们需要更新前端的 JSON 视图状态
+        if (data.pipeline) {
+            setJson(data.pipeline); 
+            // 如果你需要把整个对象放进去，就用 setJson(data);
+        } else {
+             // 兼容处理
+            setJson(data);
+        }
+        
+        console.log("Loaded:", data);
+    } catch (e: any) {
+        console.error(e);
+        alert(`Load failed: ${e.message}`);
+    }
+};
+
+// 2.2 Save: 保存 Pipeline 到数据库
+const savePipelineToDB = async () => {
+    if (!pipelineName) {
+        alert("Please enter a Pipeline Name to save!");
+        return;
+    }
+    
+    // 构造发送给后端的数据体
+    const payload = {
+        name: pipelineName,
+        pipeline: json // 这里取当前的 json 状态
+    };
+
+    try {
+        const response = await fetch("http://127.0.0.1:8003/dp/pipeline/save", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(errData.detail || "Save failed");
+        }
+
+        const result = await response.json();
+        alert(`Success! Pipeline "${result.name}" saved.`);
+        
+    } catch (e: any) {
+        console.error(e);
+        alert(`Error saving pipeline: ${e.message}`);
+    }
+};
+
+const InputGroupBasic = () => {
+    return (
+        <FormGroup>
+            <InputGroup status="information">
+                <InputGroupContent>Pipeline Name</InputGroupContent>
+                
+                {/* 修改点 1: 绑定 value 和 onChange */}
+                <Input 
+                    placeholder="PositionAggregate_v1.0" 
+                    value={pipelineName}
+                    onChange={(e: any) => {
+                        // UI5 Web Components 的 Input 事件通常在 e.target.value 中
+                        setPipelineName(e.target.value);
+                    }}
+                />
+                
+                {/* 修改点 2: 绑定 Load 函数 */}
+                <InputGroupButton onClick={loadPipelineFromDB}>
+                    Load
+                </InputGroupButton>
+                
+                {/* 修改点 3: 绑定 Save 函数 */}
+                <InputGroupButton onClick={savePipelineToDB}>
+                    Save
+                </InputGroupButton>
+                
+            </InputGroup>
+        </FormGroup>
+    );
+};

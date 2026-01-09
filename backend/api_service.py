@@ -14,7 +14,16 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from src.pipeline import DataPipeline
 
-app = FastAPI()
+# --- 新增 Import ---
+from fastapi.staticfiles import StaticFiles
+from fastapi.openapi.docs import get_swagger_ui_html
+
+# --- 修改 App 初始化：禁用默认的 docs_url ---
+app = FastAPI(docs_url=None, redoc_url=None) 
+
+# --- 挂载 static 目录 ---
+# 这行代码让 http://localhost:8003/static/xxx 可以访问到你文件夹里的文件
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- 数据库配置开始 ---
 # 假设 MongoDB 运行在本地默认端口，没有密码
@@ -137,7 +146,17 @@ async def run_pipeline(
         "columns": columns,
         "rows": rows,
     }
-
+    
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=app.title + " - Swagger UI",
+        oauth2_redirect_url=app.swagger_ui_oauth2_redirect_url,
+        # 关键点：将 CDN 地址替换为本地 static 地址
+        swagger_js_url="/static/swagger-ui-bundle.js",
+        swagger_css_url="/static/swagger-ui.css",
+    )
 if __name__ == '__main__':
     import uvicorn
     uvicorn.run(
